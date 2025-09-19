@@ -1,0 +1,9 @@
+flask
+flask-cors
+pyngrok
+openai
+pandas
+firebase-admin
+pytesseract
+pdf2image
+python-dateutil
