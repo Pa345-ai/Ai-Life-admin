@@ -1,0 +1,193 @@
+# -----------------------------
+# Install required packages
+# -----------------------------
+!pip install flask flask-cors pyngrok openai pandas firebase-admin pytesseract pdf2image python-dateutil --quiet
+
+# -----------------------------
+# Imports
+# -----------------------------
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from pyngrok import ngrok
+import threading
+import openai
+import firebase_admin
+from firebase_admin import credentials, firestore
+from pdf2image import convert_from_bytes
+import pytesseract
+import re
+from dateutil import parser
+import io
+import os  # Added for environment variable
+
+# -----------------------------
+# Set API keys and tokens
+# -----------------------------
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  # <-- environment variable
+NGROK_AUTHTOKEN = "32JVcF0u9Wdf7vhliGN1iNCCb7C_5DUp2ewNSr5bkrvgVjJD8"
+openai.api_key = OPENAI_API_KEY
+
+# -----------------------------
+# Configure Firebase
+# -----------------------------
+firebase_creds_json = {
+    "type": "service_account",
+    "project_id": "ai-life-admin-1b094",
+    "private_key_id": "e8c8afd44c6500a059ee2f5a1d6533fc1b4e1c28",
+    "private_key": """-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCX+XkuJ3JiupAz
+nSIirpDcFQe3Ulhf1clwa5/ZZ+o6+k4HmJb9rnkzjaMy4W+/feJ7xirJVJ9mAV1B
+eB5o5h4tk4vDXVTcriDP1mFZ/yCXRKEFzSvm+WbGKGKsddjO+U69tbljgSjAJYrA
+CN6HBV++Er5fP3v0uZqeEWGAO5cqBQyoDjzetXa3YKu0uLI8PgtgMah0Pdx2qoCb
+MZ+R4KlyWBBwCZEGemtd2/lPqmr4Ip9UaRZBWEwN0Xi8MKsGXuzP3z7qkkmamC5x
+COHJJZxQEM6H+hjSGlg54mbs7q9Sh0MMRrdfLRIljPWDmnWVCJ4zPjrk4G+pzeZi
+75+V4cxJAgMBAAECggEAOmIbvLBo0Cbt6PYvu/UmL3ZgzXtz+fUueuLNuP6jzF6G
+hYKIVxKk+zopfQ2AGaepz3UU0N2SkuRpSBJ2VEQ7SbUKF1aOmGzIrC+mnKVXhuVV
+mt30RLqBUhUHu0tWrES4jEb43pIq7o49nIKLwoE9A889lWfVHfIDxT/WHiZGb1yD
+Ks/vaXdag075/WI8rbckzKK9Wz8BW1lbaaA5O0Z50BDIQKi0gPIeK1q4vSQwstEE
+ykA3RqX0Mc3OQHiQSVNrYcmLVbFWjRQvm87NCzJc0D51uFxgLZGamxCAv9IiZ9w5
+ooOQCZZZT0kEP5ezl5kzvQslWUF/mjhjswJ1qzM19QKBgQDWSYLaQDSLvDJaVBEQ
+lKod20hIojXJBja899m1Zw2sDKy7hCFYXC/f4+il4ovl47PtH5RQKkqIZkRGpplA
+KxGE6VHipzi2YEc17E/ItYdEBvQqor0zYK2QuQEN4t8YI8g7gn8Q3iLnUD/0KGIg
+kUipgdOYnBVezb2XI0eZu2HrLwKBgQC1jsKYYi3dpOkZ6Es0IBIRITqoTu6EgQI1
+1c0ANNpR8Es7Chirlm0/QI2dRIoWvyVg66l+TibhgASwhU8tGOc1zPr7AO+Pmo8m
+vgaZnEhamQT9Ys05xvCqs2oHMZXLux6NiO8WJbTrdbAL5PTYWg7Yk3PczBLvTtxS
+Q7Y15AICBwKBgQC03g9IT/EKEKsfet18dT6xPKjiRafIKSqCjWCAsJ7lnT0eeQP8
+JLNz8lYnzfPu8ian+oOgtlF6l3cBexTXCIMdACJRgHtp1BHG/dLJwg6N6KCma/3u
+I6fcA4tUQS20nl8fe6HshtJHE4Enf/5zJq2CBUaoBPY0sstXijuhEnwvmQKBgHsf
+oV/t1OTmnR3wpm9nAFmVi03wmVhKlNEleKyXKyc+KgaTxj82+EdY47CvdmYOoq6j
+ooIBReTPCF8dSKBwrvuRUvM9ozhjvIitfZRWo8qs0vFzO3HfM/7PRSwzuD49W27o
+WhtO3u5/FTA7yL+f80l0VbJ6wqx/cnJncP4C7kmpAoGAFHlu2On9z8883Y/Fl+a1
+udA46RSNsD3A7coo3gAi/8cucjts3eNbmZVc60I495IW+LxajcCO1wbbimuxKdIb
+FbPRczmsP+LV2zrb79TX/VCk+4KLjgAY8mI5kZXREQhkRf/JoJyAueRREdUoe1QT
+/QVJxyTI4mbYFZ0nCS+ygXI=
+-----END PRIVATE KEY-----""",
+    "client_email": "firebase-adminsdk-fbsvc@ai-life-admin-1b094.iam.gserviceaccount.com",
+    "client_id": "118011306923709935810",
+    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+    "token_uri": "https://oauth2.googleapis.com/token",
+    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+    "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc@ai-life-admin-1b094.iam.gserviceaccount.com"
+}
+
+cred = credentials.Certificate(firebase_creds_json)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+# -----------------------------
+# Configure Flask
+# -----------------------------
+app = Flask(__name__)
+CORS(app)
+
+# -----------------------------
+# Endpoints (All premium features included)
+# -----------------------------
+@app.route("/ai-task", methods=["POST"])
+def ai_task():
+    user_id = request.json.get("user_id", "default_user")
+    task_text = request.json.get("task", "")
+    suggestion = f"Reminder: {task_text}. Suggested due: tomorrow."
+    db.collection("users").document(user_id).collection("tasks").add({
+        "task": task_text,
+        "suggestion": suggestion
+    })
+    return jsonify({"suggestion": suggestion})
+
+@app.route("/analyze-doc", methods=["POST"])
+def analyze_doc():
+    file = request.files.get("file")
+    user_id = request.form.get("user_id", "default_user")
+    if file.filename.endswith(".pdf"):
+        images = convert_from_bytes(file.read())
+        text = "\n".join([pytesseract.image_to_string(img) for img in images])
+    else:
+        text = pytesseract.image_to_string(file)
+
+    ai_response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are a hyper-intelligent AI life assistant that extracts deadlines, payments, action items, predicts financial/admin risk, and suggests actions from documents."},
+            {"role": "user", "content": f"Analyze this document: {text}"}
+        ],
+        max_tokens=600
+    )
+
+    ai_summary = ai_response['choices'][0]['message']['content']
+    dates_found = re.findall(r'\b\d{4}-\d{2}-\d{2}\b', text)
+    deadlines = [parser.parse(date).strftime("%Y-%m-%d") for date in dates_found]
+
+    doc_ref = db.collection("users").document(user_id).collection("documents").document()
+    doc_ref.set({
+        "text": text,
+        "ai_summary": ai_summary,
+        "deadlines": deadlines
+    })
+
+    return jsonify({"ai_summary": ai_summary, "deadlines": deadlines})
+
+@app.route("/predict-reminders", methods=["POST"])
+def predict_reminders():
+    user_id = request.json.get("user_id", "default_user")
+    docs = db.collection("users").document(user_id).collection("documents").stream()
+    reminders = []
+    for doc in docs:
+        data = doc.to_dict()
+        for date in data.get("deadlines", []):
+            reminders.append(f"Task in document {doc.id} is due on {date}.")
+    return jsonify({"predicted_reminders": reminders})
+
+@app.route("/automated-actions", methods=["POST"])
+def automated_actions():
+    user_id = request.json.get("user_id", "default_user")
+    docs = db.collection("users").document(user_id).collection("documents").stream()
+    actions = []
+    for doc in docs:
+        data = doc.to_dict()
+        for date in data.get("deadlines", []):
+            action_resp = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are an AI assistant that suggests next actions for documents."},
+                    {"role": "user", "content": f"Document content: {data['text']} with deadline {date}. Suggest action."}
+                ],
+                max_tokens=200
+            )
+            suggested_action = action_resp['choices'][0]['message']['content']
+            actions.append({"doc_id": doc.id, "deadline": date, "action": suggested_action})
+    return jsonify({"automated_actions": actions})
+
+@app.route("/compliance-check", methods=["POST"])
+def compliance_check():
+    user_id = request.json.get("user_id", "default_user")
+    docs = db.collection("users").document(user_id).collection("documents").stream()
+    issues = []
+    for doc in docs:
+        text = doc.to_dict().get("text", "")
+        if "expired" in text.lower():
+            issues.append(f"Document {doc.id} may contain expired licenses or contracts.")
+    return jsonify({"compliance_issues": issues})
+
+@app.route("/share-access", methods=["POST"])
+def share_access():
+    user_id = request.json.get("user_id")
+    collaborator_email = request.json.get("collaborator_email")
+    db.collection("users").document(user_id).collection("collaborators").document(collaborator_email).set({
+        "email": collaborator_email
+    })
+    return jsonify({"status": f"Collaborator {collaborator_email} added for user {user_id}"})
+
+# -----------------------------
+# Run Flask App in Background
+# -----------------------------
+def run():
+    app.run(port=5000)
+
+threading.Thread(target=run).start()
+
+# -----------------------------
+# Ngrok Tunnel
+# -----------------------------
+!ngrok authtoken {NGROK_AUTHTOKEN}
+public_url = ngrok.connect(5000)
+print("Your public ngrok URL:", public_url)
